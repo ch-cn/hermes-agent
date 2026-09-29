@@ -1,23 +1,45 @@
 name: Build Hermes Desktop (Windows)
+
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # 去 GitHub Actions 页手动点 “Run workflow”
+  push:
+    branches: [desktop-build]
+
 jobs:
-  build:
-    runs-on: windows-latest
+  build-desktop-win:
+    runs-on: windows-latest   # GitHub 的 Windows 官方便携 runner，无需 wine
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
-      - name: Pin npm 11.17+
+
+      - name: Pin npm 12.0.2
         run: npm install -g npm@12.0.2
-      - run: npm ci
-      - working-directory: apps/desktop
+
+      - name: Install workspace dependencies (root)
+        run: npm ci
+
+      - name: Build Windows NSIS installer
+        working-directory: apps/desktop
         run: npm run dist:win
-      - uses: actions/upload-artifact@v5
+
+      - name: Inspect build output (找找 exe 在哪)
+        working-directory: apps/desktop
+        run: |
+          Get-ChildItem -Path . -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch 'node_modules' } |
+            Select-Object FullName, @{N='MB';E={[math]::Round($_.Length/1MB,1)}}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v5
         with:
           name: hermes-desktop-win
-          path: apps/desktop/release/*.exe
+          path: apps/desktop/release/**
           if-no-files-found: error
+          retention-days: 30
