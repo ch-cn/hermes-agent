@@ -15,10 +15,20 @@ jobs:
       - name: Resolve latest release tag (自动取最新 vX.Y.Z)
         shell: bash
         run: |
-          git fetch --tags --force origin 2>/dev/null || true
-          git fetch --tags --force https://github.com/NousResearch/hermes-agent.git 2>/dev/null || true
-          LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-          [[ -z "$LATEST" ]] && { echo "No semver release tags found"; exit 1; }
+          set +e
+          echo "== fetch tags =="
+          git fetch --tags --force origin 2>&1 | tail -5
+          git fetch --tags --force https://github.com/NousResearch/hermes-agent.git 2>&1 | tail -5
+          LATEST="$(git tag --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+          if [ -z "$LATEST" ]; then
+            echo "no semver tag via sort, trying git describe"
+            LATEST="$(git describe --tags --abbrev=0 2>/dev/null)"
+          fi
+          if [ -z "$LATEST" ]; then
+            echo "::error::No release tag found. Tags on this clone:"
+            git tag | tail -30
+            exit 1
+          fi
           echo "Using release tag: $LATEST"
           echo "LATEST_TAG=$LATEST" >> "$GITHUB_ENV"
           git checkout "$LATEST"
