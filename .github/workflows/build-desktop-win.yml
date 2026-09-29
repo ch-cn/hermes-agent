@@ -1,17 +1,27 @@
 name: Build Hermes Desktop (Windows)
-
 on:
-  workflow_dispatch:        # 去 GitHub Actions 页手动点 “Run workflow”
-  push:
-    branches: [desktop-build]
+  workflow_dispatch:
 
 jobs:
   build-desktop-win:
-    runs-on: windows-latest   # GitHub 的 Windows 官方便携 runner，无需 wine
+    runs-on: windows-latest
     timeout-minutes: 120
     steps:
-      - name: Checkout
+      - name: Checkout (带全部历史/tag)
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve latest release tag (自动取最新 vX.Y.Z)
+        shell: bash
+        run: |
+          git fetch --tags --force origin 2>/dev/null || true
+          git fetch --tags --force https://github.com/NousResearch/hermes-agent.git 2>/dev/null || true
+          LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          [[ -z "$LATEST" ]] && { echo "No semver release tags found"; exit 1; }
+          echo "Using release tag: $LATEST"
+          echo "LATEST_TAG=$LATEST" >> "$GITHUB_ENV"
+          git checkout "$LATEST"
 
       - name: Setup Node 24
         uses: actions/setup-node@v5
@@ -25,9 +35,11 @@ jobs:
       - name: Install workspace dependencies (root)
         run: npm ci
 
-      - name: Build Windows NSIS installer
+      - name: Build Windows NSIS installer (.exe)
         working-directory: apps/desktop
-        run: npm run dist:win
+        run: |
+          npm run build
+          npm run builder -- --win nsis
 
       - name: Inspect build output (找找 exe 在哪)
         working-directory: apps/desktop
@@ -40,6 +52,6 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: hermes-desktop-win
-          path: apps/desktop/release/**
+          path: apps/desktop/release/*.exe
           if-no-files-found: error
           retention-days: 30
