@@ -6,16 +6,17 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
-          npm-version: 11.17.0
           cache: npm
+      - name: Pin npm 11.17+
+        run: npm install -g npm@12.0.2
       - run: npm ci
       - working-directory: apps/desktop
         run: npm run dist:win:nsis
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: hermes-desktop-win
           path: apps/desktop/release/*.exe
