@@ -1,0 +1,22 @@
+name: Build Hermes Desktop (Windows)
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          npm-version: 11.17.0
+          cache: npm
+      - run: npm ci
+      - working-directory: apps/desktop
+        run: npm run dist:win:nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-desktop-win
+          path: apps/desktop/release/*.exe
+          if-no-files-found: error
