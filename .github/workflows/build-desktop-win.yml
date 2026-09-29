@@ -20,6 +20,8 @@ jobs:
   build-desktop-win:
     runs-on: windows-latest
     timeout-minutes: 120
+    permissions:
+      contents: write        # 允许发布 GitHub Release / push tag
     steps:
       - name: Checkout (带全部历史/tag)
         uses: actions/checkout@v5
@@ -52,6 +54,8 @@ jobs:
           fi
           echo "SKIP=$SKIP" >> "$GITHUB_ENV"
           git checkout "$LATEST"
+          # 确保该 tag 存在于 fork，Release 才能基于它创建
+          git push origin "$LATEST_TAG" 2>&1 | tail -2 || true
 
       - name: No new release — skip
         if: env.SKIP == 'true'
@@ -82,7 +86,7 @@ jobs:
 
       - name: Record last built tag
         if: env.SKIP != 'true'
-        run: gh variable set LAST_BUILT_TAG "$LATEST_TAG"
+        run: gh variable set LAST_BUILT_TAG --body "$LATEST_TAG"
 
       - name: Inspect build output
         if: env.SKIP != 'true'
@@ -100,3 +104,15 @@ jobs:
           path: apps/desktop/release/*.exe
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub Release (让产物可 RSS 订阅)
+        if: env.SKIP != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.LATEST_TAG }}
+          files: apps/desktop/release/*.exe
+          body: |
+            Hermes Desktop 自动构建 (${{ env.LATEST_TAG }})
+            - 安装包：apps/desktop/release/*.exe
+            - 由 GitHub Actions 每日/手动自动构建
+          fail_on_unmatched_files: true
