@@ -22,6 +22,8 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write        # 允许发布 GitHub Release / push tag
+    env:
+      GH_TOKEN: ${{ github.token }}   # 让 gh 命令在 Actions 内可用
     steps:
       - name: Checkout (带全部历史/tag)
         uses: actions/checkout@v5
