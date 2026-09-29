@@ -1,4 +1,4 @@
-name: Build Hermes Desktop (Windows)
+name: 0. Build Hermes Desktop (Windows)
 on:
   workflow_dispatch:
     inputs:
@@ -22,13 +22,20 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write        # 允许发布 GitHub Release / push tag
-    env:
-      GH_TOKEN: ${{ github.token }}   # 让 gh 命令在 Actions 内可用
     steps:
       - name: Checkout (带全部历史/tag)
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Restore last-built marker (Actions 缓存)
+        id: marker
+        uses: actions/cache@v4
+        with:
+          path: last-built-tag
+          key: last-built-${{ github.run_id }}
+          restore-keys: |
+            last-built-
 
       - name: Resolve release tag + 判断是否跳过
         id: resolve
@@ -51,7 +58,7 @@ jobs:
           # 无新版本 且 未手动指版 且 非强制 -> 跳过本次
           SKIP=false
           if [ -z "${{ inputs.tag }}" ] && [ "${{ inputs.force }}" != "true" ]; then
-            LAST="$(gh variable get LAST_BUILT_TAG 2>/dev/null || true)"
+            LAST="$(cat last-built-tag 2>/dev/null | tr -d '[:space:]')"
             [ "$LAST" = "$LATEST" ] && SKIP=true
           fi
           echo "SKIP=$SKIP" >> "$GITHUB_ENV"
@@ -86,9 +93,17 @@ jobs:
           npm run build
           npm run builder -- --win nsis
 
-      - name: Record last built tag
+      - name: Write last-built marker
         if: env.SKIP != 'true'
-        run: gh variable set LAST_BUILT_TAG --body "$LATEST_TAG"
+        shell: bash
+        run: echo "$LATEST_TAG" > last-built-tag
+
+      - name: Save last-built marker (Actions 缓存)
+        if: env.SKIP != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: last-built-tag
+          key: last-built-${{ github.run_id }}
 
       - name: Inspect build output
         if: env.SKIP != 'true'
