@@ -1,6 +1,20 @@
 name: Build Hermes Desktop (Windows)
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '指定版本 tag（留空 = 自动取最新 release，如 v0.21.5）'
+        required: false
+        default: ''
+      force:
+        description: '强制重建（即使无新版本）'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 3 * * *'        # 每天 UTC 03:00 自动检查并构建最新 release
+  push:
+    tags:
+      - 'v*'                   # 向本仓库 push 一个 v 开头 tag 时立即触发
 
 jobs:
   build-desktop-win:
@@ -12,46 +26,66 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve latest release tag (自动取最新 vX.Y.Z)
+      - name: Resolve release tag + 判断是否跳过
+        id: resolve
         shell: bash
         run: |
           set +e
-          echo "== fetch tags =="
-          git fetch --tags --force origin 2>&1 | tail -5
-          git fetch --tags --force https://github.com/NousResearch/hermes-agent.git 2>&1 | tail -5
-          LATEST="$(git tag --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+          LATEST="${{ inputs.tag }}"
           if [ -z "$LATEST" ]; then
-            echo "no semver tag via sort, trying git describe"
-            LATEST="$(git describe --tags --abbrev=0 2>/dev/null)"
+            echo "== fetch tags (自动最新) =="
+            git fetch --tags --force origin 2>&1 | tail -3
+            git fetch --tags --force https://github.com/NousResearch/hermes-agent.git 2>&1 | tail -3
+            LATEST="$(git tag --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+            [ -z "$LATEST" ] && LATEST="$(git describe --tags --abbrev=0 2>/dev/null)"
+            [ -z "$LATEST" ] && { echo "::error::No release tag found"; git tag | tail -30; exit 1; }
           fi
-          if [ -z "$LATEST" ]; then
-            echo "::error::No release tag found. Tags on this clone:"
-            git tag | tail -30
-            exit 1
-          fi
-          echo "Using release tag: $LATEST"
+          echo "Using tag: $LATEST"
           echo "LATEST_TAG=$LATEST" >> "$GITHUB_ENV"
+          echo "VERSION=${LATEST#v}" >> "$GITHUB_ENV"
+
+          # 无新版本 且 未手动指版 且 非强制 -> 跳过本次
+          SKIP=false
+          if [ -z "${{ inputs.tag }}" ] && [ "${{ inputs.force }}" != "true" ]; then
+            LAST="$(gh variable get LAST_BUILT_TAG 2>/dev/null || true)"
+            [ "$LAST" = "$LATEST" ] && SKIP=true
+          fi
+          echo "SKIP=$SKIP" >> "$GITHUB_ENV"
           git checkout "$LATEST"
 
+      - name: No new release — skip
+        if: env.SKIP == 'true'
+        run: echo "Already at $LATEST_TAG, no rebuild needed."
+
       - name: Setup Node 24
+        if: env.SKIP != 'true'
         uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
 
       - name: Pin npm 12.0.2
+        if: env.SKIP != 'true'
         run: npm install -g npm@12.0.2
 
       - name: Install workspace dependencies (root)
+        if: env.SKIP != 'true'
         run: npm ci
 
-      - name: Build Windows NSIS installer (.exe)
+      - name: Set version from tag, then build NSIS (.exe)
+        if: env.SKIP != 'true'
         working-directory: apps/desktop
         run: |
+          npm pkg set version=$env:VERSION
           npm run build
           npm run builder -- --win nsis
 
-      - name: Inspect build output (找找 exe 在哪)
+      - name: Record last built tag
+        if: env.SKIP != 'true'
+        run: gh variable set LAST_BUILT_TAG "$LATEST_TAG"
+
+      - name: Inspect build output
+        if: env.SKIP != 'true'
         working-directory: apps/desktop
         run: |
           Get-ChildItem -Path . -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
@@ -59,6 +93,7 @@ jobs:
             Select-Object FullName, @{N='MB';E={[math]::Round($_.Length/1MB,1)}}
 
       - name: Upload installer artifact
+        if: env.SKIP != 'true'
         uses: actions/upload-artifact@v5
         with:
           name: hermes-desktop-win
