@@ -1,5 +1,5 @@
 # ============================================================
-#  配置版本: 2026-09-30-r1
+#  配置版本: 2026-09-30-09:54
 #  功能: Hermes Desktop Windows 自动构建 (GitHub Actions)
 #    - 自动取官方最新 release tag 构建 NSIS .exe
 #    - 独立 desktop-* tag 发布到 GitHub Release (可 RSS 订阅)
@@ -61,7 +61,7 @@ jobs:
           fi
           echo "Using tag: $LATEST"
           VERSION="${LATEST#v}"
-          BUILD_DATE="$(date +%Y%m%d-%H%M)"
+          BUILD_DATE="$(TZ=Asia/Shanghai date +%Y-%m-%d-%H:%M)"
           echo "LATEST_TAG=$LATEST" >> "$GITHUB_ENV"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_DATE=$BUILD_DATE" >> "$GITHUB_ENV"
@@ -141,6 +141,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.REL_TAG }}
+          name: Hermes Desktop ${{ env.LATEST_TAG }}
           files: apps/desktop/release/*.exe
           body: |
             Hermes Desktop 自动构建（基于官方 ${{ env.LATEST_TAG }}）
