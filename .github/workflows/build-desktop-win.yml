@@ -1,4 +1,12 @@
-name: 0. Build Hermes Desktop (Windows)
+# ============================================================
+#  配置版本: 2026-09-30-r1
+#  功能: Hermes Desktop Windows 自动构建 (GitHub Actions)
+#    - 自动取官方最新 release tag 构建 NSIS .exe
+#    - 独立 desktop-* tag 发布到 GitHub Release (可 RSS 订阅)
+#    - 每日定时 + 手动 + push v tag 三触发, 无新版本自动跳过
+#  备注: 改动此处后请同步更新顶部"配置版本"
+# ============================================================
+name: Build Hermes Desktop (Windows)
 on:
   workflow_dispatch:
     inputs:
@@ -30,7 +38,7 @@ jobs:
 
       - name: Restore last-built marker (Actions 缓存)
         id: marker
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: last-built-tag
           key: last-built-${{ github.run_id }}
@@ -52,8 +60,11 @@ jobs:
             [ -z "$LATEST" ] && { echo "::error::No release tag found"; git tag | tail -30; exit 1; }
           fi
           echo "Using tag: $LATEST"
+          VERSION="${LATEST#v}"
+          BUILD_DATE="$(date +%Y%m%d-%H%M)"
           echo "LATEST_TAG=$LATEST" >> "$GITHUB_ENV"
-          echo "VERSION=${LATEST#v}" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$BUILD_DATE" >> "$GITHUB_ENV"
 
           # 无新版本 且 未手动指版 且 非强制 -> 跳过本次
           SKIP=false
@@ -63,8 +74,11 @@ jobs:
           fi
           echo "SKIP=$SKIP" >> "$GITHUB_ENV"
           git checkout "$LATEST"
-          # 确保该 tag 存在于 fork，Release 才能基于它创建
-          git push origin "$LATEST_TAG" 2>&1 | tail -2 || true
+          # 用独立的构建 tag（不沿用官方 tag），推送到 fork 供 Release 使用
+          REL_TAG="desktop-${VERSION}-${GITHUB_RUN_ID}"
+          echo "REL_TAG=$REL_TAG" >> "$GITHUB_ENV"
+          git tag "$REL_TAG"
+          git push origin "$REL_TAG" 2>&1 | tail -2 || true
 
       - name: No new release — skip
         if: env.SKIP == 'true'
@@ -100,7 +114,7 @@ jobs:
 
       - name: Save last-built marker (Actions 缓存)
         if: env.SKIP != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: last-built-tag
           key: last-built-${{ github.run_id }}
@@ -115,7 +129,7 @@ jobs:
 
       - name: Upload installer artifact
         if: env.SKIP != 'true'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hermes-desktop-win
           path: apps/desktop/release/*.exe
@@ -124,12 +138,13 @@ jobs:
 
       - name: Publish GitHub Release (让产物可 RSS 订阅)
         if: env.SKIP != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ env.LATEST_TAG }}
+          tag_name: ${{ env.REL_TAG }}
           files: apps/desktop/release/*.exe
           body: |
-            Hermes Desktop 自动构建 (${{ env.LATEST_TAG }})
+            Hermes Desktop 自动构建（基于官方 ${{ env.LATEST_TAG }}）
+            - 构建时间：${{ env.BUILD_DATE }}
             - 安装包：apps/desktop/release/*.exe
-            - 由 GitHub Actions 每日/手动自动构建
+            - 由 GitHub Actions 构建
           fail_on_unmatched_files: true
