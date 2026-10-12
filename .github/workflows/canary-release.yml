@@ -79,3 +79,4 @@ jobs:
       - name: Prune R2 canary objects
         if: env.CLOUDFLARE_R2_ACCOUNT_ID != ''
         run: python -m scripts.ci.python_packages ruamel.yaml==0.18.17 -- -m scripts.releases.r2 prune-canaries --keep-days 14
+

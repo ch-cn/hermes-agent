@@ -1,0 +1,151 @@
+# ============================================================
+#  配置版本: 2026-09-30-09:54
+#  功能: Hermes Desktop Windows 自动构建 (GitHub Actions)
+#    - 自动取官方最新 release tag 构建 NSIS .exe
+#    - 独立 desktop-* tag 发布到 GitHub Release (可 RSS 订阅)
+#    - 每日定时 + 手动 + push v tag 三触发, 无新版本自动跳过
+#  备注: 改动此处后请同步更新顶部"配置版本"
+# ============================================================
+name: Build Hermes Desktop (Windows)
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '指定版本 tag（留空 = 自动取最新 release，如 v0.21.5）'
+        required: false
+        default: ''
+      force:
+        description: '强制重建（即使无新版本）'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 3 * * *'        # 每天 UTC 03:00 自动检查并构建最新 release
+  push:
+    tags:
+      - 'v*'                   # 向本仓库 push 一个 v 开头 tag 时立即触发
+
+jobs:
+  build-desktop-win:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write        # 允许发布 GitHub Release / push tag
+    steps:
+      - name: Checkout (带全部历史/tag)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Restore last-built marker (Actions 缓存)
+        id: marker
+        uses: actions/cache@v5
+        with:
+          path: last-built-tag
+          key: last-built-${{ github.run_id }}
+          restore-keys: |
+            last-built-
+
+      - name: Resolve release tag + 判断是否跳过
+        id: resolve
+        shell: bash
+        run: |
+          set +e
+          LATEST="${{ inputs.tag }}"
+          if [ -z "$LATEST" ]; then
+            echo "== fetch tags (自动最新) =="
+            git fetch --tags --force origin 2>&1 | tail -3
+            git fetch --tags --force https://github.com/NousResearch/hermes-agent.git 2>&1 | tail -3
+            LATEST="$(git tag --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+            [ -z "$LATEST" ] && LATEST="$(git describe --tags --abbrev=0 2>/dev/null)"
+            [ -z "$LATEST" ] && { echo "::error::No release tag found"; git tag | tail -30; exit 1; }
+          fi
+          echo "Using tag: $LATEST"
+          VERSION="${LATEST#v}"
+          BUILD_DATE="$(TZ=Asia/Shanghai date +%Y-%m-%d-%H:%M)"
+          echo "LATEST_TAG=$LATEST" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$BUILD_DATE" >> "$GITHUB_ENV"
+
+          # 无新版本 且 未手动指版 且 非强制 -> 跳过本次
+          SKIP=false
+          if [ -z "${{ inputs.tag }}" ] && [ "${{ inputs.force }}" != "true" ]; then
+            LAST="$(cat last-built-tag 2>/dev/null | tr -d '[:space:]')"
+            [ "$LAST" = "$LATEST" ] && SKIP=true
+          fi
+          echo "SKIP=$SKIP" >> "$GITHUB_ENV"
+          git checkout "$LATEST"
+          # 用独立的构建 tag（不沿用官方 tag），推送到 fork 供 Release 使用
+          REL_TAG="desktop-${VERSION}-${GITHUB_RUN_ID}"
+          echo "REL_TAG=$REL_TAG" >> "$GITHUB_ENV"
+          git tag "$REL_TAG"
+          git push origin "$REL_TAG" 2>&1 | tail -2 || true
+
+      - name: No new release — skip
+        if: env.SKIP == 'true'
+        run: echo "Already at $LATEST_TAG, no rebuild needed."
+
+      - name: Setup Node 24
+        if: env.SKIP != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Pin npm 12.0.2
+        if: env.SKIP != 'true'
+        run: npm install -g npm@12.0.2
+
+      - name: Install workspace dependencies (root)
+        if: env.SKIP != 'true'
+        run: npm ci
+
+      - name: Set version from tag, then build NSIS (.exe)
+        if: env.SKIP != 'true'
+        working-directory: apps/desktop
+        run: |
+          npm pkg set version=$env:VERSION
+          npm run build
+          npm run builder -- --win nsis
+
+      - name: Write last-built marker
+        if: env.SKIP != 'true'
+        shell: bash
+        run: echo "$LATEST_TAG" > last-built-tag
+
+      - name: Save last-built marker (Actions 缓存)
+        if: env.SKIP != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: last-built-tag
+          key: last-built-${{ github.run_id }}
+
+      - name: Inspect build output
+        if: env.SKIP != 'true'
+        working-directory: apps/desktop
+        run: |
+          Get-ChildItem -Path . -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch 'node_modules' } |
+            Select-Object FullName, @{N='MB';E={[math]::Round($_.Length/1MB,1)}}
+
+      - name: Upload installer artifact
+        if: env.SKIP != 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: hermes-desktop-win
+          path: apps/desktop/release/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release (让产物可 RSS 订阅)
+        if: env.SKIP != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.REL_TAG }}
+          name: Hermes Desktop ${{ env.LATEST_TAG }}
+          files: apps/desktop/release/*.exe
+          body: |
+            Hermes Desktop 自动构建（基于官方 ${{ env.LATEST_TAG }}）
+            - 构建时间：${{ env.BUILD_DATE }}
+            - 安装包：apps/desktop/release/*.exe
+            - 由 GitHub Actions 构建
+          fail_on_unmatched_files: true
