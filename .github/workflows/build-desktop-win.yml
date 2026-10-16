@@ -47,13 +47,12 @@ jobs:
           set -euo pipefail
           LATEST="${{ inputs.tag }}"
           if [ -z "$LATEST" ]; then
-            # 只从 upstream 读最新 release tag（不依赖本地 git 仓库、不 fetch 对象）
-            UP="https://github.com/NousResearch/hermes-agent.git"
-            echo "== ls-remote upstream tags =="
-            # 只取官方日期式 vYYYY.M.D; 行首 sha 由 sed 去掉; ^{} 皮剥离行被日期正则排除; sort -V 取最大
-            LATEST="$(git ls-remote --tags "$UP" | sed 's#^.*refs/tags/##' | grep -E '^v[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$' | sort -V | tail -1)"
-            if [ -z "$LATEST" ]; then
-              echo "::error::No official date tag found via ls-remote"
+            # 直接用 GitHub API 取“最新正式 release”的 tag（按发布时间, 不自己解析 tag 名,
+            # 兼容日期式 v2026.9.x 与 semver 式 v0.22.x 两种命名）。
+            echo "== query GitHub API latest release =="
+            LATEST="$(curl -sf https://api.github.com/repos/NousResearch/hermes-agent/releases/latest | jq -r .tag_name)"
+            if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+              echo "::error::No official release found via GitHub API"
               exit 1
             fi
           fi
