@@ -1,5 +1,5 @@
 # ============================================================
-#  配置版本: 2026-09-30-09:54
+#  配置版本: 2026-10-08
 #  功能: Hermes Desktop Windows 自动构建 (GitHub Actions)
 #    - 自动取官方最新 release tag 构建 NSIS .exe
 #    - 独立 desktop-* tag 发布到 GitHub Release (可 RSS 订阅)
@@ -49,15 +49,22 @@ jobs:
         id: resolve
         shell: bash
         run: |
-          set +e
+          set -euo pipefail
           LATEST="${{ inputs.tag }}"
           if [ -z "$LATEST" ]; then
-            echo "== fetch tags (自动最新) =="
-            git fetch --tags --force origin 2>&1 | tail -3
-            git fetch --tags --force https://github.com/NousResearch/hermes-agent.git 2>&1 | tail -3
-            LATEST="$(git tag --sort=-v:refname 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
-            [ -z "$LATEST" ] && LATEST="$(git describe --tags --abbrev=0 2>/dev/null)"
-            [ -z "$LATEST" ] && { echo "::error::No release tag found"; git tag | tail -30; exit 1; }
+            # 官方仓库登记为 upstream 并强制抓取其全部 tag。
+            # 关键: 单次匿名 fetch 易被限流/静默失败, set -e 会在此直接失败, 不会用错 tag 继续构建。
+            git remote remove upstream 2>/dev/null || true
+            git remote add upstream https://github.com/NousResearch/hermes-agent.git
+            echo "== fetch official tags from upstream =="
+            git fetch upstream --tags --force
+            # 官方 release tag 为日期式 vYYYY.M.D, 只取这一类并取版本最大者
+            LATEST="$(git tag -l 'v[0-9]*' | grep -E '^v[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$' | sort -V | tail -1)"
+            if [ -z "$LATEST" ]; then
+              echo "::error::No official date tag found"
+              git tag | tail -30
+              exit 1
+            fi
           fi
           echo "Using tag: $LATEST"
           VERSION="${LATEST#v}"
@@ -70,7 +77,7 @@ jobs:
           SKIP=false
           if [ -z "${{ inputs.tag }}" ] && [ "${{ inputs.force }}" != "true" ]; then
             LAST="$(cat last-built-tag 2>/dev/null | tr -d '[:space:]')"
-            [ "$LAST" = "$LATEST" ] && SKIP=true
+            if [ "$LAST" = "$LATEST" ]; then SKIP=true; fi
           fi
           echo "SKIP=$SKIP" >> "$GITHUB_ENV"
           git checkout "$LATEST"
