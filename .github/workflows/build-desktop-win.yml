@@ -31,11 +31,6 @@ jobs:
     permissions:
       contents: write        # 允许发布 GitHub Release / push tag
     steps:
-      - name: Checkout (带全部历史/tag)
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
       - name: Restore last-built marker (Actions 缓存)
         id: marker
         uses: actions/cache@v5
@@ -45,45 +40,45 @@ jobs:
           restore-keys: |
             last-built-
 
-      - name: Resolve release tag + 判断是否跳过
+      - name: Resolve upstream 最新 release tag + 判断跳过
         id: resolve
         shell: bash
         run: |
           set -euo pipefail
           LATEST="${{ inputs.tag }}"
           if [ -z "$LATEST" ]; then
-            # 直接从 upstream 读最新 release tag —— 完全不看 fork(origin/ch-cn) 的 tag, 避免选错。
+            # 只从 upstream 读最新 release tag（不依赖本地 git 仓库、不 fetch 对象）
             UP="https://github.com/NousResearch/hermes-agent.git"
             echo "== ls-remote upstream tags =="
-            # 只取官方日期式 vYYYY.M.D; sed 去掉行首 sha; ^{} 皮剥离行会被日期正则排除; sort -V 取最大
+            # 只取官方日期式 vYYYY.M.D; 行首 sha 由 sed 去掉; ^{} 皮剥离行被日期正则排除; sort -V 取最大
             LATEST="$(git ls-remote --tags "$UP" | sed 's#^.*refs/tags/##' | grep -E '^v[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$' | sort -V | tail -1)"
             if [ -z "$LATEST" ]; then
               echo "::error::No official date tag found via ls-remote"
               exit 1
             fi
-            echo "== fetch tag $LATEST 的 commit =="
-            git fetch "$UP" tag "$LATEST" --force
           fi
           echo "Using tag: $LATEST"
           VERSION="${LATEST#v}"
           BUILD_DATE="$(TZ=Asia/Shanghai date +%Y-%m-%d-%H:%M)"
-          echo "LATEST_TAG=$LATEST" >> "$GITHUB_ENV"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "BUILD_DATE=$BUILD_DATE" >> "$GITHUB_ENV"
-
-          # 无新版本 且 未手动指版 且 非强制 -> 跳过本次
           SKIP=false
           if [ -z "${{ inputs.tag }}" ] && [ "${{ inputs.force }}" != "true" ]; then
             LAST="$(cat last-built-tag 2>/dev/null | tr -d '[:space:]')"
             if [ "$LAST" = "$LATEST" ]; then SKIP=true; fi
           fi
-          echo "SKIP=$SKIP" >> "$GITHUB_ENV"
-          git checkout "$LATEST"
-          # 用独立的构建 tag（不沿用官方 tag），推送到 fork 供 Release 使用
           REL_TAG="desktop-${VERSION}-${GITHUB_RUN_ID}"
+          echo "LATEST_TAG=$LATEST" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$BUILD_DATE" >> "$GITHUB_ENV"
+          echo "SKIP=$SKIP" >> "$GITHUB_ENV"
           echo "REL_TAG=$REL_TAG" >> "$GITHUB_ENV"
-          git tag "$REL_TAG"
-          git push origin "$REL_TAG" 2>&1 | tail -2 || true
+
+      - name: Checkout 官方最新 release tag
+        if: env.SKIP != 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ env.LATEST_TAG }}
+          token: ${{ github.token }}
 
       - name: No new release — skip
         if: env.SKIP == 'true'
