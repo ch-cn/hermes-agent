@@ -52,9 +52,13 @@ jobs:
             TMPGIT="$(mktemp -d)"
             git -C "$TMPGIT" init -q
             git -C "$TMPGIT" remote add up https://github.com/NousResearch/hermes-agent.git
-            echo "== fetch upstream tags (仅 tag, 按创建时间取最新) =="
+            echo "== fetch upstream tags (仅 tag, 按创建时间取最新正式版) =="
             git -C "$TMPGIT" fetch --quiet --tags up 2>&1 | tail -3 || true
-            LATEST="$(git -C "$TMPGIT" for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags/ | grep -Ev '\^{\}' | head -1)"
+            # 按创建时间倒序取最新 tag; 排除名字带 canary(或其他预发布标记)的, 只留正式 release
+            LATEST="$(git -C "$TMPGIT" for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags/ \
+                       | grep -Ev '\^{\}' \
+                       | grep -viE 'canary|pre|rc|beta|alpha|nightly|dev|snapshot' \
+                       | head -1)"
             rm -rf "$TMPGIT"
             if [ -z "$LATEST" ]; then
               echo "::error::No upstream release tag"
