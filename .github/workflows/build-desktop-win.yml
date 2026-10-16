@@ -47,14 +47,20 @@ jobs:
           set -euo pipefail
           LATEST="${{ inputs.tag }}"
           if [ -z "$LATEST" ]; then
-            # 直接用 GitHub API 取“最新正式 release”的 tag（按发布时间, 不自己解析 tag 名,
-            # 兼容日期式 v2026.9.x 与 semver 式 v0.22.x 两种命名）。
-            echo "== query GitHub API latest release =="
-            LATEST="$(curl -sf https://api.github.com/repos/NousResearch/hermes-agent/releases/latest | jq -r .tag_name)"
-            if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
-              echo "::error::No official release found via GitHub API"
+            # 用 git 按“tag 创建时间”取 upstream 最新发布（不吃 GitHub API 限流,
+            # 兼容日期式 v2026.9.x 与 semver 式 v0.22.x 两种命名——谁后发布谁是 latest）。
+            TMPGIT="$(mktemp -d)"
+            git -C "$TMPGIT" init -q
+            git -C "$TMPGIT" remote add up https://github.com/NousResearch/hermes-agent.git
+            echo "== fetch upstream tags (仅 tag, 按创建时间取最新) =="
+            git -C "$TMPGIT" fetch --quiet --tags up 2>&1 | tail -3 || true
+            LATEST="$(git -C "$TMPGIT" for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags/ | grep -Ev '\^{\}' | head -1)"
+            rm -rf "$TMPGIT"
+            if [ -z "$LATEST" ]; then
+              echo "::error::No upstream release tag"
               exit 1
             fi
+            echo "Latest upstream release: $LATEST"
           fi
           echo "Using tag: $LATEST"
           VERSION="${LATEST#v}"
