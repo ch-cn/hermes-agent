@@ -1,7 +1,7 @@
 # ============================================================
-#  配置版本: 2026-10-08
+#  配置版本: 2026-10-16-18:02
 #  功能: Hermes Desktop Windows 自动构建 (GitHub Actions)
-#    - 自动取官方最新 release tag 构建 NSIS .exe
+#    - 自动取官方最新 release tag 构建 MSIX 安装包 (v0.22.x 起官方只出 msix)
 #    - 独立 desktop-* tag 发布到 GitHub Release (可 RSS 订阅)
 #    - 每日定时 + 手动 + push v tag 三触发, 无新版本自动跳过
 #  备注: 改动此处后请同步更新顶部"配置版本"
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '指定版本 tag（留空 = 自动取最新 release，如 v0.21.5）'
+        description: '指定版本 tag（留空 = 自动取最新 release，如 v0.22.2）'
         required: false
         default: ''
       force:
@@ -108,13 +108,13 @@ jobs:
         if: env.SKIP != 'true'
         run: npm ci
 
-      - name: Set version from tag, then build NSIS (.exe)
+      - name: Set version from tag, then build MSIX
         if: env.SKIP != 'true'
         working-directory: apps/desktop
         run: |
           npm pkg set version=$env:VERSION
           npm run build
-          npm run builder -- --win nsis
+          npm run builder -- --win msix
 
       - name: Write last-built marker
         if: env.SKIP != 'true'
@@ -132,7 +132,7 @@ jobs:
         if: env.SKIP != 'true'
         working-directory: apps/desktop
         run: |
-          Get-ChildItem -Path . -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
+          Get-ChildItem -Path . -Recurse -Filter *.msix* -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -notmatch 'node_modules' } |
             Select-Object FullName, @{N='MB';E={[math]::Round($_.Length/1MB,1)}}
 
@@ -141,7 +141,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: hermes-desktop-win
-          path: apps/desktop/release/*.exe
+          path: apps/desktop/release/*.msix*
           if-no-files-found: error
           retention-days: 30
 
@@ -151,10 +151,10 @@ jobs:
         with:
           tag_name: ${{ env.REL_TAG }}
           name: Hermes Desktop ${{ env.LATEST_TAG }}
-          files: apps/desktop/release/*.exe
+          files: apps/desktop/release/*.msix*
           body: |
             Hermes Desktop 自动构建（基于官方 ${{ env.LATEST_TAG }}）
             - 构建时间：${{ env.BUILD_DATE }}
-            - 安装包：apps/desktop/release/*.exe
+            - 安装包：apps/desktop/release/*.msix*
             - 由 GitHub Actions 构建
           fail_on_unmatched_files: true
