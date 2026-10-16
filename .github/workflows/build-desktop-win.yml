@@ -52,19 +52,17 @@ jobs:
           set -euo pipefail
           LATEST="${{ inputs.tag }}"
           if [ -z "$LATEST" ]; then
-            # 官方仓库登记为 upstream 并强制抓取其全部 tag。
-            # 关键: 单次匿名 fetch 易被限流/静默失败, set -e 会在此直接失败, 不会用错 tag 继续构建。
-            git remote remove upstream 2>/dev/null || true
-            git remote add upstream https://github.com/NousResearch/hermes-agent.git
-            echo "== fetch official tags from upstream =="
-            git fetch upstream --tags --force
-            # 官方 release tag 为日期式 vYYYY.M.D, 只取这一类并取版本最大者
-            LATEST="$(git tag -l 'v[0-9]*' | grep -E '^v[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$' | sort -V | tail -1)"
+            # 直接从 upstream 读最新 release tag —— 完全不看 fork(origin/ch-cn) 的 tag, 避免选错。
+            UP="https://github.com/NousResearch/hermes-agent.git"
+            echo "== ls-remote upstream tags =="
+            # 只取官方日期式 vYYYY.M.D; sed 去掉行首 sha; ^{} 皮剥离行会被日期正则排除; sort -V 取最大
+            LATEST="$(git ls-remote --tags "$UP" | sed 's#^.*refs/tags/##' | grep -E '^v[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$' | sort -V | tail -1)"
             if [ -z "$LATEST" ]; then
-              echo "::error::No official date tag found"
-              git tag | tail -30
+              echo "::error::No official date tag found via ls-remote"
               exit 1
             fi
+            echo "== fetch tag $LATEST 的 commit =="
+            git fetch "$UP" tag "$LATEST" --force
           fi
           echo "Using tag: $LATEST"
           VERSION="${LATEST#v}"
