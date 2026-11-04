@@ -1,9 +1,10 @@
 # ============================================================
-#  配置版本: 2026-10-16-20:08
+#  配置版本: 2026-11-04-10:17
 #  功能: Hermes Desktop Windows 自动构建 (GitHub Actions)
 #    - 自动取官方最新 release tag 构建 MSIX 安装包 (v0.22.x 起官方只出 msix)
 #    - 独立 desktop-* tag 发布到 GitHub Release (可 RSS 订阅)
 #    - 每日定时 + 手动 + push v tag 三触发, 无新版本自动跳过
+#    - Node 需 >=26 (v0.22.6 起官方最低要求), 否则 npm ci 报 EBADENGINE
 #  备注: 改动此处后请同步更新顶部"配置版本"
 # ============================================================
 name: Build Hermes Desktop (Windows)
@@ -93,11 +94,11 @@ jobs:
         if: env.SKIP == 'true'
         run: echo "Already at $LATEST_TAG, no rebuild needed."
 
-      - name: Setup Node 24
+      - name: Setup Node 26
         if: env.SKIP != 'true'
         uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
 
       - name: Pin npm 12.0.2
