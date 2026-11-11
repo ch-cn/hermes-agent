@@ -1,10 +1,11 @@
 # ============================================================
-#  配置版本: 2026-11-04-10:17
+#  配置版本: 2026-11-11-10:30
 #  功能: Hermes Desktop Windows 自动构建 (GitHub Actions)
 #    - 自动取官方最新 release tag 构建 MSIX 安装包 (v0.22.x 起官方只出 msix)
 #    - 独立 desktop-* tag 发布到 GitHub Release (可 RSS 订阅)
 #    - 每日定时 + 手动 + push v tag 三触发, 无新版本自动跳过
-#    - Node 需 >=26 (v0.22.6 起官方最低要求), 否则 npm ci 报 EBADENGINE
+#    - Node 需 >=26 (v0.22.6 起官方 npm 最低要求)
+#    - 包管理自 v0.23.1 起改用 pnpm (官方拒绝 npm, 锁文件=pnpm-lock.yaml, 版本 ^12)
 #  备注: 改动此处后请同步更新顶部"配置版本"
 # ============================================================
 name: Build Hermes Desktop (Windows)
@@ -94,28 +95,31 @@ jobs:
         if: env.SKIP == 'true'
         run: echo "Already at $LATEST_TAG, no rebuild needed."
 
-      - name: Setup Node 26
+      - name: Setup pnpm (官方 v0.23.1 起用 pnpm, 版本 ^12)
+        if: env.SKIP != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+          run_install: false
+
+      - name: Setup Node 26 (cache 用 pnpm)
         if: env.SKIP != 'true'
         uses: actions/setup-node@v5
         with:
           node-version: 26
-          cache: npm
+          cache: pnpm
 
-      - name: Pin npm 12.0.2
+      - name: Install workspace dependencies (root, pnpm)
         if: env.SKIP != 'true'
-        run: npm install -g npm@12.0.2
-
-      - name: Install workspace dependencies (root)
-        if: env.SKIP != 'true'
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Set version from tag, then build MSIX
         if: env.SKIP != 'true'
         working-directory: apps/desktop
         run: |
-          npm pkg set version=$env:VERSION
-          npm run build
-          npm run builder -- --win msix
+          node -e "const fs=require('fs');const p='package.json';const j=JSON.parse(fs.readFileSync(p));j.version=process.env.VERSION;fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')"
+          pnpm run build
+          pnpm run builder --win msix
 
       - name: Re-sign MSIX with persistent cert (无 secret 则保留自动自签)
         if: env.SKIP != 'true'
